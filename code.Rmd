@@ -1,0 +1,1322 @@
+---
+title: "Data Wrangling (Data Preprocessing). Australia Offences Data Preprocessing."
+author: "Mrwan Alhandi"
+date: "Sun 2 October 2022"
+output:
+  html_notebook: default
+  pdf_document: default
+  html_document:
+    df_print: paged
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+## **Setup**
+
+```{r include=FALSE}
+# Libraries used:
+library(kableExtra)
+library(magrittr)
+library(openxlsx)
+library(dplyr)
+library(tidyr)
+library(outliers)
+```
+
+## **Executive Summary**
+
+-   I first imported the data correctly based on how its written on the
+    excel file.
+-   I used functions like class(), dim(), str(), attributes(), and
+    as.factor()/as.numeric() to understand the data and transfer the
+    attributes type to the correct type.
+-   Then, I used gather() function to make the data tidy.
+-   After that, I created two new attributes. gender_percentage and
+    offence_rate.
+-   I found that there's a human error with the data. I fixed the error
+    by adding the missing data to the attributes.
+-   I scanned for outliers and used a method to replace/remove the
+    outlier based on the distribution of the data.
+-   Finally, I applied log transfomation to total_offences_of_gender to
+    eliminate the skewness of the distribution for both male and female.
+
+## **Data**
+
+```{r echo=TRUE}
+# Table for all Offences
+table1_all <- read.xlsx("1. Offenders, Australia.xlsx", sheet = "Table 1", rows = 6:57, cols = 1:14)
+head(table1_all, n = 3)
+
+table2_male <- read.xlsx("1. Offenders, Australia.xlsx", sheet = "Table 2", rows = 6:22, cols = 1:14)
+table2_male <- table2_male[-c(1),]
+
+table2_female <- read.xlsx("1. Offenders, Australia.xlsx", sheet = "Table 2", rows = 6:39, cols = 1:14)
+table2_female <- table2_female[-c(1:18),]
+
+table2_male <- table2_male %>% mutate(Gender = "Male")
+table2_female <- table2_female %>% mutate(Gender = "Female")
+table2_all_gender <- bind_rows(table2_male,table2_female)
+head(table2_all_gender, n = 3)
+```
+
+The data sets used are from Australian Bureau of Statistics. I have used
+two data sets. The observations of the first data set record the total
+offences by each category and sub category. The observations of the
+second data set record the total offences **by gender**. All the three
+data sets are not tidy. The problem with them is that the column headers
+are values (years), not variable names. I have first imported the
+different data sets using read.xlsx function. Then, I removed the rows
+that's not required. I could not extract the gender related data
+instantly since the data set is structured in a way that does not follow
+the three rules by Hadley Wickham and therefore I extracted male and
+female independently and then bend them together using bind_rows
+function. Finally, I used head and tail function to show a sample from
+the data sets.
+
+## **Understand**
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# The data sets are currently not tidy and therefore only some attributes can be changed to the appropriate format. When the data sets are tidy (after next sections), appropriate change to all attributes can be done.
+
+# class
+class(table1_all)
+class(table2_all_gender)
+
+# dimension
+dim_table1_all <- dim(table1_all)
+dim_table1_all
+dim_table2_all_gender <- dim(table2_all_gender)
+dim_table2_all_gender
+# variable and schema
+str(table1_all)
+str(table2_all_gender)
+# attributes
+attributes(table1_all)
+attributes(table2_all_gender)
+
+table1_all$`Principal.offence(b)(c)` <- table1_all$`Principal.offence(b)(c)` %>% as.factor()
+table2_all_gender$`Principal.offence(b)(c)` <- table2_all_gender$`Principal.offence(b)(c)` %>% as.factor()
+table2_all_gender$`2008–09` <- table2_all_gender$`2008–09` %>% as.double()
+table2_all_gender$Gender <- table2_all_gender$Gender %>% as.factor()
+
+
+```
+
+Till this step, the data sets imported are not tidy. The process of
+tidiness make sure correct attributes, observations and cells are
+located/chosen correctly. Therefore, currently only some attributes can
+be changed to the correct data type. The data sets meet the requirement
+of 2 and 4 since there are factors and numeric attributes.
+
+I decided to use the function cat() to print a neaten formatted
+description for the data sets and hide the code to shorten the report. I
+used class(),attributes(),dim(), and str() to show all class
+types,attributes,dimensions and schema.
+
+Finally, I used as.factor() and as.double() to change attributes to
+their correct data type.
+
+## **Tidy & Manipulate Data I**
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# The two data sets which are offences and offences by gender are not tidy. The data sets violate the first rule of Hadley Wickham which is column headers are variable names. But the data sets have values (years) in their column headers.
+
+colnames(table1_all)
+colnames(table2_all_gender)
+
+headers <- colnames(table1_all)
+headers <-headers[2:14]
+table1_all_tidy <- table1_all %>% gather(headers, key = "Date", value = "Total Offences")
+table1_all_tidy
+
+headers <- colnames(table2_all_gender)
+headers <-headers[2:14]
+table2_all_gender_tidy <- table2_all_gender %>% gather(headers, key = "Date", value = "Total Offences")
+table2_all_gender_tidy
+```
+
+I have first used colnames() function to show that the column headers of
+each data sets are values (dates). Then, I saved those column headers in
+a variable called headers and chose only those who are actually values
+and not attributes i.e dates. Finally, I used the function gather() and
+used the header variable as an argument to choose all values that are
+not supposed to be attributes. The function gather() will create an
+attribute that hold all the values that used to be column headers
+(dates). And each total offence then is recorded based on age,gender and
+offence type.
+
+## **Tidy & Manipulate Data II**
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# Adding a new variable for the table that contains all offences.
+# The new variable contain the percentage of the total offences of each offence category over all years in the study.
+
+# I have done this only because the second category cannot be filtered for some reasons unless I have changed the data type to factor.
+table1_all_tidy$`Principal.offence(b)(c)` <- table1_all_tidy$`Principal.offence(b)(c)` %>% as.character()
+
+# filtering based on category and then summing all the sub category offences
+section1_table1 <- table1_all_tidy %>% filter(table1_all_tidy$`Principal.offence(b)(c)` == '01 Homicide and related offences(d)' | table1_all_tidy$`Principal.offence(b)(c)` == '011 Murder' | table1_all_tidy$`Principal.offence(b)(c)` == '012 Attempted Murder' | table1_all_tidy$`Principal.offence(b)(c)` == '013 Manslaughter and driving causing death')
+section1_table1_sum <- sum(section1_table1$`Total Offences`)
+
+```
+
+```{r echo=TRUE}
+# There's a problem when filtering category two. Therefore, I used the combination between grepl and which functions to find them and calculate their sum.
+z <- grepl('Acts intended to cause injury',table1_all_tidy$`Principal.offence(b)(c)`)
+acts_index <- which(z == TRUE)
+# Changing category two string using indexes from where the which function got.
+table1_all_tidy[c(5,42,79,116,153,190,227,264,301,338,375,412,449), 1] <- '02 Acts intended to cause injury'
+
+section2_table1 <- table1_all_tidy %>% filter(table1_all_tidy$`Principal.offence(b)(c)` == '02 Acts intended to cause injury'
+| table1_all_tidy$`Principal.offence(b)(c)` == '021 Assault'
+| table1_all_tidy$`Principal.offence(b)(c)` == '029 Other acts intended to cause injury')
+section2_table1_sum <- sum(section2_table1$`Total Offences`)
+section3_table1 <- table1_all_tidy %>% filter(table1_all_tidy$`Principal.offence(b)(c)` == '03 Sexual assault and related offences(f)' | table1_all_tidy$`Principal.offence(b)(c)` == '031 Sexual assault' | table1_all_tidy$`Principal.offence(b)(c)` == '032 Non–assaultive sexual offences')
+section3_table1_sum <- sum(section3_table1$`Total Offences`)
+
+section4_table1 <- table1_all_tidy %>% filter(table1_all_tidy$`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(g)')
+section4_table1_sum <- sum(section4_table1$`Total Offences`)
+
+section5_table1 <- table1_all_tidy %>% filter(table1_all_tidy$`Principal.offence(b)(c)` == '05 Abduction/harassment')
+section5_table1_sum <- sum(section5_table1$`Total Offences`)
+
+section6_table1 <- table1_all_tidy %>% filter(table1_all_tidy$`Principal.offence(b)(c)` == '06 Robbery/extortion')
+section6_table1_sum <- sum(section6_table1$`Total Offences`)
+
+section7_table1 <- table1_all_tidy %>% filter(table1_all_tidy$`Principal.offence(b)(c)` == '07 Unlawful entry with intent')
+section7_table1_sum <- sum(section7_table1$`Total Offences`)
+
+section8_table1 <- table1_all_tidy %>% filter(table1_all_tidy$`Principal.offence(b)(c)` == '08 Theft(h)(i)' | table1_all_tidy$`Principal.offence(b)(c)` == '081 Motor vehicle theft' | table1_all_tidy$`Principal.offence(b)(c)` == '082 Theft (except motor vehicles)' | table1_all_tidy$`Principal.offence(b)(c)` == '083 Receive or handle proceeds of crime' )
+section8_table1_sum <- sum(section8_table1$`Total Offences`)
+
+section9_table1 <- table1_all_tidy %>% filter(table1_all_tidy$`Principal.offence(b)(c)` == '09 Fraud/deception(j)' | table1_all_tidy$`Principal.offence(b)(c)` == '091 Obtain benefit by deception' | table1_all_tidy$`Principal.offence(b)(c)` == '092 Forgery and counterfeiting' | table1_all_tidy$`Principal.offence(b)(c)` == '093 Deceptive business/government practices' | table1_all_tidy$`Principal.offence(b)(c)` == '099 Other fraud and deception offences')
+section9_table1_sum <- sum(section9_table1$`Total Offences`)
+
+section10_table1 <- table1_all_tidy %>% filter(table1_all_tidy$`Principal.offence(b)(c)` == '10 Illicit drug offences(k)' | table1_all_tidy$`Principal.offence(b)(c)` == '102 Deal or traffic in illicit drugs' | table1_all_tidy$`Principal.offence(b)(c)` == '103 Manufacture or cultivate illicit drugs' | table1_all_tidy$`Principal.offence(b)(c)` == '104 Possess and/or use illicit drugs')
+section10_table1_sum <- sum(section10_table1$`Total Offences`)
+
+section11_table1 <- table1_all_tidy %>% filter(table1_all_tidy$`Principal.offence(b)(c)` == '11 Weapons/explosives')
+section11_table1_sum <- sum(section11_table1$`Total Offences`)
+
+section12_table1 <- table1_all_tidy %>% filter(table1_all_tidy$`Principal.offence(b)(c)` == '12 Property damage and environmental pollution')
+section12_table1_sum <- sum(section12_table1$`Total Offences`)
+
+section13_table1 <- table1_all_tidy %>% filter(table1_all_tidy$`Principal.offence(b)(c)` == '13 Public order offences(l)' | table1_all_tidy$`Principal.offence(b)(c)` == '131 Disorderly conduct' | table1_all_tidy$`Principal.offence(b)(c)` == '132 Regulated public order offences' | table1_all_tidy$`Principal.offence(b)(c)` == '133 Offensive conduct')
+section13_table1_sum <- sum(section13_table1$`Total Offences`)
+
+section15_table1 <- table1_all_tidy %>% filter(table1_all_tidy$`Principal.offence(b)(c)` == '15 Offences against justice(m)(n)' | table1_all_tidy$`Principal.offence(b)(c)` == '153 Breach of violence and non-violence orders' | table1_all_tidy$`Principal.offence(b)(c)` == '156 Offences against justice procedures')
+section15_table1_sum <- sum(section15_table1$`Total Offences`)
+```
+
+```{r echo=TRUE}
+### I have done the same for all 16 categories
+#     SECTION 2-15 CODE RAN BUT HIDDEN FOR PAGE LIMIT AND TO MAKE REPORT MORE ORGANISED
+###
+```
+
+```{r echo=TRUE}
+section16_table1 <- table1_all_tidy %>% filter(table1_all_tidy$`Principal.offence(b)(c)` == '16 Miscellaneous offences')
+section16_table1_sum <- sum(section16_table1$`Total Offences`)
+
+# Creating offence_rate which is the total offences of sub category divided by all the offences of the category
+table1_all_tidy_withRate <- mutate(table1_all_tidy,
+                                   offence_rate = case_when(
+                                     table1_all_tidy$`Principal.offence(b)(c)` == '01 Homicide and related offences(d)' | table1_all_tidy$`Principal.offence(b)(c)` == '011 Murder' | table1_all_tidy$`Principal.offence(b)(c)` == '012 Attempted Murder' | table1_all_tidy$`Principal.offence(b)(c)` == '013 Manslaughter and driving causing death' ~ (table1_all_tidy$`Total Offences`/section1_table1_sum)*100
+                                     
+                                   ,table1_all_tidy$`Principal.offence(b)(c)` == '02 Acts intended to cause injury' |
+ table1_all_tidy$`Principal.offence(b)(c)` == '021 Assault' | table1_all_tidy$`Principal.offence(b)(c)` == '029 Other acts intended to cause injury' ~ (table1_all_tidy$`Total Offences`/section2_table1_sum)*100
+                                     
+                                     ,table1_all_tidy$`Principal.offence(b)(c)` == '03 Sexual assault and related offences(f)' | table1_all_tidy$`Principal.offence(b)(c)` == '031 Sexual assault' | table1_all_tidy$`Principal.offence(b)(c)` == '032 Non–assaultive sexual offences' ~ (table1_all_tidy$`Total Offences`/section3_table1_sum)*100
+                                     
+                                     ,table1_all_tidy$`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(g)' ~ (table1_all_tidy$`Total Offences`/section4_table1_sum)*100
+                                     
+                                     ,table1_all_tidy$`Principal.offence(b)(c)` == '05 Abduction/harassment' ~(table1_all_tidy$`Total Offences`/section5_table1_sum)*100
+                                     
+                                     ,table1_all_tidy$`Principal.offence(b)(c)` == '06 Robbery/extortion' ~(table1_all_tidy$`Total Offences`/section6_table1_sum)*100
+                                     
+                                     ,table1_all_tidy$`Principal.offence(b)(c)` == '07 Unlawful entry with intent' ~(table1_all_tidy$`Total Offences`/section7_table1_sum)*100
+                                     
+                                     ,table1_all_tidy$`Principal.offence(b)(c)` == '08 Theft(h)(i)' | table1_all_tidy$`Principal.offence(b)(c)` == '081 Motor vehicle theft' | table1_all_tidy$`Principal.offence(b)(c)` == '082 Theft (except motor vehicles)' | table1_all_tidy$`Principal.offence(b)(c)` == '083 Receive or handle proceeds of crime' ~(table1_all_tidy$`Total Offences`/section8_table1_sum)*100
+                                     
+                                     ,table1_all_tidy$`Principal.offence(b)(c)` == '09 Fraud/deception(j)' | table1_all_tidy$`Principal.offence(b)(c)` == '091 Obtain benefit by deception' | table1_all_tidy$`Principal.offence(b)(c)` == '092 Forgery and counterfeiting' | table1_all_tidy$`Principal.offence(b)(c)` == '093 Deceptive business/government practices' | table1_all_tidy$`Principal.offence(b)(c)` == '099 Other fraud and deception offences' ~ (table1_all_tidy$`Total Offences`/section9_table1_sum)*100
+                                     
+                                     ,table1_all_tidy$`Principal.offence(b)(c)` == '10 Illicit drug offences(k)' | table1_all_tidy$`Principal.offence(b)(c)` == '102 Deal or traffic in illicit drugs' | table1_all_tidy$`Principal.offence(b)(c)` == '103 Manufacture or cultivate illicit drugs' | table1_all_tidy$`Principal.offence(b)(c)` == '104 Possess and/or use illicit drugs' ~ (table1_all_tidy$`Total Offences`/section10_table1_sum)*100
+                                     
+                                     ,table1_all_tidy$`Principal.offence(b)(c)` == '11 Weapons/explosives' ~ (table1_all_tidy$`Total Offences`/section11_table1_sum)*100
+                                     
+                                     ,table1_all_tidy$`Principal.offence(b)(c)` == '12 Property damage and environmental pollution' ~ (table1_all_tidy$`Total Offences`/section12_table1_sum)*100
+                                     
+                                     ,table1_all_tidy$`Principal.offence(b)(c)` == '13 Public order offences(l)' | table1_all_tidy$`Principal.offence(b)(c)` == '131 Disorderly conduct' | table1_all_tidy$`Principal.offence(b)(c)` == '132 Regulated public order offences' | table1_all_tidy$`Principal.offence(b)(c)` == '133 Offensive conduct' ~ (table1_all_tidy$`Total Offences`/section13_table1_sum)*100
+                                     
+                                     ,table1_all_tidy$`Principal.offence(b)(c)` == '15 Offences against justice(m)(n)' | table1_all_tidy$`Principal.offence(b)(c)` == '153 Breach of violence and non-violence orders' | table1_all_tidy$`Principal.offence(b)(c)` == '156 Offences against justice procedures' ~ (table1_all_tidy$`Total Offences`/section15_table1_sum)*100
+                                     
+                                     ,table1_all_tidy$`Principal.offence(b)(c)` == '16 Miscellaneous offences' ~ (table1_all_tidy$`Total Offences`/section16_table1_sum)*100))
+
+# The new data set with offence_rate
+table1_all_tidy_withRate
+
+# Creating a percentage for gender variable
+# Removing sub categories
+table_all_tidy_onlyMainOffences <- table1_all_tidy_withRate %>% filter(`Principal.offence(b)(c)` == '01 Homicide and related offences(d)' | `Principal.offence(b)(c)` == '02 Acts intended to cause injury' | `Principal.offence(b)(c)` == '03 Sexual assault and related offences(f)' | `Principal.offence(b)(c)` == '04 Dangerous/negligent acts(g)' | `Principal.offence(b)(c)` == '05 Abduction/harassment' | `Principal.offence(b)(c)` =='06 Robbery/extortion'| `Principal.offence(b)(c)` == '07 Unlawful entry with intent' | `Principal.offence(b)(c)` == '08 Theft(h)(i)' | `Principal.offence(b)(c)` == '09 Fraud/deception(j)' | `Principal.offence(b)(c)` == '10 Illicit drug offences(k)' | `Principal.offence(b)(c)` == '11 Weapons/explosives' | `Principal.offence(b)(c)` == '12 Property damage and environmental pollution' | `Principal.offence(b)(c)` == '13 Public order offences(l)' | `Principal.offence(b)(c)` == '15 Offences against justice(m)(n)' | `Principal.offence(b)(c)` == '16 Miscellaneous offences')
+
+# Changing prinicpal offence column to character type in order to be able to change the cells values and then join the two tables.
+table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` <- table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` %>% as.character()
+
+# In order to use left_join(), values must match, therefore I changed all the categories string to match those in gender table.
+table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)`[table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` == '01 Homicide and related offences(d)'
+ ] <- '01 Homicide and related offences'
+
+```
+
+```{r echo=TRUE}
+### I have done the same for all 16 categories
+#     SECTION 2-15 CODE RAN BUT HIDDEN FOR PAGE LIMIT AND TO MAKE REPORT MORE ORGANISED
+###
+```
+
+```{r echo=TRUE}
+table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)`[table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` == '02 Acts intended to cause injury'
+ ] <- '02 Acts intended to cause injury'
+
+table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)`[table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` == '03 Sexual assault and related offences(f)'
+ ] <- '03 Sexual assault and related offences'
+
+table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)`[table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(g)'
+ ] <- '04 Dangerous/negligent acts(d)'
+
+table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)`[table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` == '05 Abduction/harassment'
+ ] <- '05 Abduction/harassment'
+
+table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)`[table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` == '06 Robbery/extortion'
+ ] <- '06 Robbery/extortion'
+
+table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)`[table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` == '07 Unlawful entry with intent'
+ ] <- '07 Unlawful entry with intent'
+
+table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)`[table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` == '08 Theft(h)(i)'
+ ] <- '08 Theft(e)'
+
+table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)`[table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` == '09 Fraud/deception(j)'
+ ] <- '09 Fraud/deception'
+
+table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)`[table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` == '10 Illicit drug offences(k)'
+ ] <- '10 Illicit drug offences'
+
+table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)`[table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` == '11 Weapons/explosives'
+ ] <- '11 Weapons/explosives'
+
+table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)`[table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` == '12 Property damage and environmental pollution'
+ ] <- '12 Property damage and environmental pollution'
+
+table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)`[table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` == '13 Public order offences(l)'
+ ] <- '13 Public order offences'
+
+table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)`[table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` == '15 Offences against justice(m)(n)'
+ ] <- '15 Offences against justice(f)'
+```
+
+```{r echo=TRUE}
+table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)`[table_all_tidy_onlyMainOffences$`Principal.offence(b)(c)` == '16 Miscellaneous offences'
+ ] <- '16 Miscellaneous offences'
+
+# Using left join in order to be able to mutate the new variable (gender_percentage)
+joined_table <- table2_all_gender_tidy %>% left_join(table_all_tidy_onlyMainOffences, by = c("Principal.offence(b)(c)","Date"))
+
+# Changing column names
+colnames(joined_table)[4] <- 'total_offences_of_gender'
+colnames(joined_table)[5] <- 'total_offences_both_gender'
+
+# Using mutate to create the new variable (gender_percentage)
+joined_table <- joined_table %>% mutate(gender_percentage = (joined_table$total_offences_of_gender/joined_table$total_offences_both_gender)*100)
+
+joined_table
+
+# To make sure the calculations are correct. offence_rate should sum up to 1600 where each category is 100%. gender_percentage should sum up to 19500 where there are 13 recorded dates and 15 categories. Each recorded date for each category is 100% and so that is 13 * 100 = 1300. There are 15 categories and therefore 15 * 1300 = 19500.
+sum(table1_all_tidy_withRate$offence_rate)
+sum(joined_table$gender_percentage)
+
+# The result of offence_rate is accurate and precise, but for gender_percentage there's an error where the value should be 195000. This could be due to human errors whether with the process I took when creating the attribute or with the the data itself. I made this assumption since when I was creating the new attributes, I faced no errors with missing values, special values or obvious inconsistencies. Also, the data sets are relatively small and it's possible to check for those type of errors. In the next section, I will use methods/functions to prove that the data have no missing values,special values or obvious inconsistencies. I will also find in which category the human error could be from and try to add the missing cases to make the data more accurate.
+```
+
+I have created two new variables in two different data set. offence_rate
+in data set table1_all_tidy_withRate: This variable contain the
+percentage of the total offences of each category and sub category
+through all studies dates. gender_percentage in data set joined_table:
+This variable contain the percentage of gender contribution to the total
+offences by each category.
+
+Process of creating offence_rate:
+
+1- Filtered each categoy with its sub-categories using the function
+filter(). Then, I used the function sum() to sum the total offences.
+
+2- There was a problem when filtering category two. This might be due to
+the white spaces the string contains. Therefore, I used both functions
+grepl() and which() to fix this.
+
+3- After calculating the total offences by each category, I can now use
+the function mutate to create offence_rate variable. I also used
+case_when inside mutate to check the category and make the correct
+calculating.
+
+Process of creating gender_percentage variable:
+
+The main idea was to join the table table1_all_tidy_withRate which
+contains the total offences with table2_all_gender_tidy which contains
+gender and the total offences by that gender.
+
+1- I removed sub categories from table1_all_tidy_withRate because I'm
+only interested to get the total offences and add it to the gender
+table.
+
+2- In order to use left_join(), the chosen column to join by, the values
+must match. Therefore, I changed all values in Principal.offence(b)(c)
+column to be the same in both table. I was trying to do that but I could
+not when the column was of a type factor. I used the function
+as.character() to change the column type.
+
+3- Same issue faced when was trying to change category two, but I used
+the same approach as before.
+
+4- left_join() now can be used which will add the total offences of all
+categories to the gender data set.
+
+5- I have changed the column names by using colnames() function.
+
+6- Changed the type of total_offences_of_gender and
+total_offences_both_gender columns to numeric type.
+
+7- Finally, I used mutate to create gender_percentage.
+
+## **Scan I**
+
+```{r echo=TRUE}
+# In this section I will check for missing values, special values and obvious inconsistencies for the two data sets.
+#Checking missing values, special values, and obvious inconsistencies for data set 1:table1_all_tidy_withRate.
+# -- Data set 1: table1_all_tidy_withRate -- 
+# Missing values:
+table1_all_tidy_withRate %>% is.na() %>% sum()
+#  Special values:
+table1_all_tidy_withRate$`Total Offences` %>% is.infinite() %>% sum()
+table1_all_tidy_withRate$offence_rate %>% is.infinite() %>% sum()
+table1_all_tidy_withRate$`Total Offences` %>% is.nan() %>% sum()
+table1_all_tidy_withRate$offence_rate %>% is.nan() %>% sum()
+
+#All zeros and hence the data set have no missing values nor special values.
+# Obvious inconsistency:
+# Crime record cannot be negative value:
+table1_all_tidy_withRate_negative1 <- (table1_all_tidy_withRate$`Total Offences` < 0)
+table1_all_tidy_withRate_negative2 <- (table1_all_tidy_withRate$offence_rate < 0)
+any_negative1 <- which(table1_all_tidy_withRate_negative1 == TRUE)
+any_negative2 <- which(table1_all_tidy_withRate_negative2 == TRUE)
+any_negative1
+any_negative2
+# Both are empty
+
+# Checking missing values, special values, and obvious inconsistencies for data set 2:joined_table.
+# -- Data set 2: joined_table -- 
+# Missing values:
+joined_table %>% is.na() %>% sum()
+#  Special values:
+joined_table$total_offences_of_gender %>% is.infinite() %>% sum()
+joined_table$total_offences_both_gender %>% is.infinite() %>% sum()
+joined_table$offence_rate%>% is.infinite() %>% sum()
+joined_table$gender_percentage %>% is.infinite() %>% sum()
+
+joined_table$total_offences_of_gender %>% is.nan() %>% sum()
+joined_table$total_offences_both_gender %>% is.nan() %>% sum()
+joined_table$offence_rate%>% is.nan() %>% sum()
+joined_table$gender_percentage %>% is.nan() %>% sum()
+# Obvious inconsistency:
+# Crime record cannot be negative value:
+joined_table_negative3 <- (joined_table$total_offences_of_gender < 0)
+joined_table_negative4 <- (joined_table$total_offences_both_gender < 0)
+joined_table_negative5 <- (joined_table$offence_rate < 0)
+joined_table_negative6 <- (joined_table$gender_percentage < 0)
+
+any_negative3 <- which(joined_table_negative3 == TRUE)
+any_negative4 <- which(joined_table_negative4 == TRUE)
+any_negative5 <- which(joined_table_negative5 == TRUE)
+any_negative6 <- which(joined_table_negative6 == TRUE)
+any_negative3
+any_negative4
+any_negative5
+any_negative6
+# All tables are empty. No negative values.
+
+# Checking why gender_percentage attribute does not sum up to 19500 and which category contains the human error. As explained before, gender_percentage should sum up to 19500 where there are 13 recorded dates and 15 categories. Each recorded date is 100% and so that is 13 * 100 = 1300. There are 15 categories and therefore 15 * 1300 = 195000.
+
+total_01_filter <- joined_table %>% filter(`Principal.offence(b)(c)` == '01 Homicide and related offences')
+total_01_sum <- sum(total_01_filter$gender_percentage)
+percentage_diff_01 <- 1300 - total_01_sum
+
+total_01_filter_male <- total_01_filter %>% filter(Gender == 'Male')
+total_01_filter_female <- total_01_filter %>% filter(Gender == 'Female')
+total_01_filter_male_sum <- sum(total_01_filter_male$gender_percentage)
+total_01_filter_female_sum <- sum(total_01_filter_female$gender_percentage)
+total_01_filter_male_sum_ratio <- total_01_filter_male_sum/1300
+total_01_filter_female_sum_ratio <- total_01_filter_female_sum/1300
+total_01_filter_male_howMuchCases <- total_01_filter_male_sum_ratio * percentage_diff_01
+total_01_filter_female_howMuchCases <- total_01_filter_female_sum_ratio * percentage_diff_01
+total_01_filter_male_howMuchToAdd <- total_01_filter_male_howMuchCases / 13
+total_01_filter_female_howMuchToAdd <- total_01_filter_female_howMuchCases / 13
+
+numCases_01_total <- ( percentage_diff_01 * section1_table1_sum ) / 100
+numCases_01_total_male <- numCases_01_total * total_01_filter_male_sum_ratio
+numCases_01_total_female <- numCases_01_total * total_01_filter_female_sum_ratio
+numCases_01_total_male_howMuchToAdd <- numCases_01_total_male / 13
+numCases_01_total_female_howMuchToAdd <- numCases_01_total_female / 13
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '01 Homicide and related offences' & joined_table$Gender == 'Male'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '01 Homicide and related offences' & joined_table$Gender == 'Male'] + total_01_filter_male_howMuchToAdd
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '01 Homicide and related offences' & joined_table$Gender == 'Female'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '01 Homicide and related offences' & joined_table$Gender == 'Female'] + total_01_filter_female_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '01 Homicide and related offences' & joined_table$Gender == 'Male'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '01 Homicide and related offences' & joined_table$Gender == 'Male'] + numCases_01_total_male_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '01 Homicide and related offences' & joined_table$Gender == 'Female'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '01 Homicide and related offences' & joined_table$Gender == 'Female'] + numCases_01_total_female_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '01 Homicide and related offences' & joined_table$Gender == 'Male'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '01 Homicide and related offences' & joined_table$Gender == 'Male'] + numCases_01_total_male_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '01 Homicide and related offences' & joined_table$Gender == 'Female'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '01 Homicide and related offences' & joined_table$Gender == 'Female'] + numCases_01_total_female_howMuchToAdd
+
+```
+
+```{r echo=TRUE}
+### I have done the same for all 16 categories
+#     SECTION 2-16 CODE RAN BUT HIDDEN FOR PAGE LIMIT AND TO MAKE REPORT MORE ORGANISED
+###
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# SECTION 2
+total_02_filter <- joined_table %>% filter(`Principal.offence(b)(c)` == '02 Acts intended to cause injury')
+total_02_sum <- sum(total_02_filter$gender_percentage)
+percentage_diff_02 <- 1300 - total_02_sum
+
+total_02_filter_male <- total_02_filter %>% filter(Gender == 'Male')
+total_02_filter_female <- total_02_filter %>% filter(Gender == 'Female')
+total_02_filter_male_sum <- sum(total_02_filter_male$gender_percentage)
+total_02_filter_female_sum <- sum(total_02_filter_female$gender_percentage)
+total_02_filter_male_sum_ratio <- total_02_filter_male_sum/1300
+total_02_filter_female_sum_ratio <- total_02_filter_female_sum/1300
+total_02_filter_male_howMuchCases <- total_02_filter_male_sum_ratio * percentage_diff_02
+total_02_filter_female_howMuchCases <- total_02_filter_female_sum_ratio * percentage_diff_02
+total_02_filter_male_howMuchToAdd <- total_02_filter_male_howMuchCases / 13
+total_02_filter_female_howMuchToAdd <- total_02_filter_female_howMuchCases / 13
+
+numCases_02_total <- ( percentage_diff_02 * section2_table1_sum ) / 100
+numCases_02_total_male <- numCases_02_total * total_02_filter_male_sum_ratio
+numCases_02_total_female <- numCases_02_total * total_02_filter_female_sum_ratio
+numCases_02_total_male_howMuchToAdd <- numCases_02_total_male / 13
+numCases_02_total_female_howMuchToAdd <- numCases_02_total_female / 13
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '02 Acts intended to cause injury' & joined_table$Gender == 'Male'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '02 Acts intended to cause injury' & joined_table$Gender == 'Male'] + total_02_filter_male_howMuchToAdd
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '02 Acts intended to cause injury' & joined_table$Gender == 'Female'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '02 Acts intended to cause injury' & joined_table$Gender == 'Female'] + total_02_filter_female_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '02 Acts intended to cause injury' & joined_table$Gender == 'Male'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '02 Acts intended to cause injury' & joined_table$Gender == 'Male'] + numCases_02_total_male_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '02 Acts intended to cause injury' & joined_table$Gender == 'Female'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '02 Acts intended to cause injury' & joined_table$Gender == 'Female'] + numCases_02_total_female_howMuchToAdd
+
+# SECTION 3
+total_03_filter <- joined_table %>% filter(`Principal.offence(b)(c)` == '03 Sexual assault and related offences')
+total_03_sum <- sum(total_03_filter$gender_percentage)
+percentage_diff_03 <- 1300 - total_03_sum
+
+total_03_filter_male <- total_03_filter %>% filter(Gender == 'Male')
+total_03_filter_female <- total_03_filter %>% filter(Gender == 'Female')
+total_03_filter_male_sum <- sum(total_03_filter_male$gender_percentage)
+total_03_filter_female_sum <- sum(total_03_filter_female$gender_percentage)
+total_03_filter_male_sum_ratio <- total_03_filter_male_sum/1300
+total_03_filter_female_sum_ratio <- total_03_filter_female_sum/1300
+total_03_filter_male_howMuchCases <- total_03_filter_male_sum_ratio * percentage_diff_03
+total_03_filter_female_howMuchCases <- total_03_filter_female_sum_ratio * percentage_diff_03
+total_03_filter_male_howMuchToAdd <- total_03_filter_male_howMuchCases / 13
+total_03_filter_female_howMuchToAdd <- total_03_filter_female_howMuchCases / 13
+
+numCases_03_total <- ( percentage_diff_03 * section3_table1_sum ) / 100
+numCases_03_total_male <- numCases_03_total * total_03_filter_male_sum_ratio
+numCases_03_total_female <- numCases_03_total * total_03_filter_female_sum_ratio
+numCases_03_total_male_howMuchToAdd <- numCases_03_total_male / 13
+numCases_03_total_female_howMuchToAdd <- numCases_03_total_female / 13
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '03 Sexual assault and related offences' & joined_table$Gender == 'Male'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '03 Sexual assault and related offences' & joined_table$Gender == 'Male'] + total_03_filter_male_howMuchToAdd
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '03 Sexual assault and related offences' & joined_table$Gender == 'Female'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '03 Sexual assault and related offences' & joined_table$Gender == 'Female'] + total_03_filter_female_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '03 Sexual assault and related offences' & joined_table$Gender == 'Male'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '03 Sexual assault and related offences' & joined_table$Gender == 'Male'] + numCases_03_total_male_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '03 Sexual assault and related offences' & joined_table$Gender == 'Female'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '03 Sexual assault and related offences' & joined_table$Gender == 'Female'] + numCases_03_total_female_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '03 Sexual assault and related offences' & joined_table$Gender == 'Male'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '03 Sexual assault and related offences' & joined_table$Gender == 'Male'] + numCases_03_total_male_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '03 Sexual assault and related offences' & joined_table$Gender == 'Female'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '03 Sexual assault and related offences' & joined_table$Gender == 'Female'] + numCases_03_total_female_howMuchToAdd
+
+# SECTION 4
+total_04_filter <- joined_table %>% filter(`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(d)')
+total_04_sum <- sum(total_04_filter$gender_percentage)
+percentage_diff_04 <- 1300 - total_04_sum
+
+total_04_filter_male <- total_04_filter %>% filter(Gender == 'Male')
+total_04_filter_female <- total_04_filter %>% filter(Gender == 'Female')
+total_04_filter_male_sum <- sum(total_04_filter_male$gender_percentage)
+total_04_filter_female_sum <- sum(total_04_filter_female$gender_percentage)
+total_04_filter_male_sum_ratio <- total_04_filter_male_sum/1300
+total_04_filter_female_sum_ratio <- total_04_filter_female_sum/1300
+total_04_filter_male_howMuchCases <- total_04_filter_male_sum_ratio * percentage_diff_04
+total_04_filter_female_howMuchCases <- total_04_filter_female_sum_ratio * percentage_diff_04
+total_04_filter_male_howMuchToAdd <- total_04_filter_male_howMuchCases / 13
+total_04_filter_female_howMuchToAdd <- total_04_filter_female_howMuchCases / 13
+
+numCases_04_total <- ( percentage_diff_04 * section4_table1_sum ) / 100
+numCases_04_total_male <- numCases_04_total * total_04_filter_male_sum_ratio
+numCases_04_total_female <- numCases_04_total * total_04_filter_female_sum_ratio
+numCases_04_total_male_howMuchToAdd <- numCases_04_total_male / 13
+numCases_04_total_female_howMuchToAdd <- numCases_04_total_female / 13
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(d)' & joined_table$Gender == 'Male'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(d)' & joined_table$Gender == 'Male'] + total_04_filter_male_howMuchToAdd
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(d)' & joined_table$Gender == 'Female'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(d)' & joined_table$Gender == 'Female'] + total_04_filter_female_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(d)' & joined_table$Gender == 'Male'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(d)' & joined_table$Gender == 'Male'] + numCases_04_total_male_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(d)' & joined_table$Gender == 'Female'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(d)' & joined_table$Gender == 'Female'] + numCases_04_total_female_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(d)' & joined_table$Gender == 'Male'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(d)' & joined_table$Gender == 'Male'] + numCases_04_total_male_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(d)' & joined_table$Gender == 'Female'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(d)' & joined_table$Gender == 'Female'] + numCases_04_total_female_howMuchToAdd
+
+# SECTION 5
+total_05_filter <- joined_table %>% filter(`Principal.offence(b)(c)` == '05 Abduction/harassment')
+total_05_sum <- sum(total_05_filter$gender_percentage)
+percentage_diff_05 <- 1300 - total_05_sum
+
+total_05_filter_male <- total_05_filter %>% filter(Gender == 'Male')
+total_05_filter_female <- total_05_filter %>% filter(Gender == 'Female')
+total_05_filter_male_sum <- sum(total_05_filter_male$gender_percentage)
+total_05_filter_female_sum <- sum(total_05_filter_female$gender_percentage)
+total_05_filter_male_sum_ratio <- total_05_filter_male_sum/1300
+total_05_filter_female_sum_ratio <- total_05_filter_female_sum/1300
+total_05_filter_male_howMuchCases <- total_05_filter_male_sum_ratio * percentage_diff_05
+total_05_filter_female_howMuchCases <- total_05_filter_female_sum_ratio * percentage_diff_05
+total_05_filter_male_howMuchToAdd <- total_05_filter_male_howMuchCases / 13
+total_05_filter_female_howMuchToAdd <- total_05_filter_female_howMuchCases / 13
+
+numCases_05_total <- ( percentage_diff_05 * section5_table1_sum ) / 100
+numCases_05_total_male <- numCases_05_total * total_05_filter_male_sum_ratio
+numCases_05_total_female <- numCases_05_total * total_05_filter_female_sum_ratio
+numCases_05_total_male_howMuchToAdd <- numCases_05_total_male / 13
+numCases_05_total_female_howMuchToAdd <- numCases_05_total_female / 13
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '05 Abduction/harassment' & joined_table$Gender == 'Male'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '05 Abduction/harassment' & joined_table$Gender == 'Male'] + total_05_filter_male_howMuchToAdd
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '05 Abduction/harassment' & joined_table$Gender == 'Female'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '05 Abduction/harassment' & joined_table$Gender == 'Female'] + total_05_filter_female_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '05 Abduction/harassment' & joined_table$Gender == 'Male'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '05 Abduction/harassment' & joined_table$Gender == 'Male'] + numCases_05_total_male_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '05 Abduction/harassment' & joined_table$Gender == 'Female'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '05 Abduction/harassment' & joined_table$Gender == 'Female'] + numCases_05_total_female_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '05 Abduction/harassment' & joined_table$Gender == 'Male'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '05 Abduction/harassment' & joined_table$Gender == 'Male'] + numCases_05_total_male_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '05 Abduction/harassment' & joined_table$Gender == 'Female'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '05 Abduction/harassment' & joined_table$Gender == 'Female'] + numCases_05_total_female_howMuchToAdd
+
+# SECTION 6
+total_06_filter <- joined_table %>% filter(`Principal.offence(b)(c)` == '06 Robbery/extortion')
+total_06_sum <- sum(total_06_filter$gender_percentage)
+percentage_diff_06 <- 1300 - total_06_sum
+
+total_06_filter_male <- total_06_filter %>% filter(Gender == 'Male')
+total_06_filter_female <- total_06_filter %>% filter(Gender == 'Female')
+total_06_filter_male_sum <- sum(total_06_filter_male$gender_percentage)
+total_06_filter_female_sum <- sum(total_06_filter_female$gender_percentage)
+total_06_filter_male_sum_ratio <- total_06_filter_male_sum/1300
+total_06_filter_female_sum_ratio <- total_06_filter_female_sum/1300
+total_06_filter_male_howMuchCases <- total_06_filter_male_sum_ratio * percentage_diff_06
+total_06_filter_female_howMuchCases <- total_06_filter_female_sum_ratio * percentage_diff_06
+total_06_filter_male_howMuchToAdd <- total_06_filter_male_howMuchCases / 13
+total_06_filter_female_howMuchToAdd <- total_06_filter_female_howMuchCases / 13
+
+numCases_06_total <- ( percentage_diff_06 * section6_table1_sum ) / 100
+numCases_06_total_male <- numCases_06_total * total_06_filter_male_sum_ratio
+numCases_06_total_female <- numCases_06_total * total_06_filter_female_sum_ratio
+numCases_06_total_male_howMuchToAdd <- numCases_06_total_male / 13
+numCases_06_total_female_howMuchToAdd <- numCases_06_total_female / 13
+
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '06 Robbery/extortion' & joined_table$Gender == 'Male'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '06 Robbery/extortion' & joined_table$Gender == 'Male'] + total_06_filter_male_howMuchToAdd
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '06 Robbery/extortion' & joined_table$Gender == 'Female'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '06 Robbery/extortion' & joined_table$Gender == 'Female'] + total_06_filter_female_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '06 Robbery/extortion' & joined_table$Gender == 'Male'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '06 Robbery/extortion' & joined_table$Gender == 'Male'] + numCases_06_total_male_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '06 Robbery/extortion' & joined_table$Gender == 'Female'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '06 Robbery/extortion' & joined_table$Gender == 'Female'] + numCases_06_total_female_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '06 Robbery/extortion' & joined_table$Gender == 'Male'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '06 Robbery/extortion' & joined_table$Gender == 'Male'] + numCases_06_total_male_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '06 Robbery/extortion' & joined_table$Gender == 'Female'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '06 Robbery/extortion' & joined_table$Gender == 'Female'] + numCases_06_total_female_howMuchToAdd
+
+# SECTION 7
+total_07_filter <- joined_table %>% filter(`Principal.offence(b)(c)` == '07 Unlawful entry with intent')
+total_07_sum <- sum(total_07_filter$gender_percentage)
+percentage_diff_07 <- 1300 - total_07_sum
+
+total_07_filter_male <- total_07_filter %>% filter(Gender == 'Male')
+total_07_filter_female <- total_07_filter %>% filter(Gender == 'Female')
+total_07_filter_male_sum <- sum(total_07_filter_male$gender_percentage)
+total_07_filter_female_sum <- sum(total_07_filter_female$gender_percentage)
+total_07_filter_male_sum_ratio <- total_07_filter_male_sum/1300
+total_07_filter_female_sum_ratio <- total_07_filter_female_sum/1300
+total_07_filter_male_howMuchCases <- total_07_filter_male_sum_ratio * percentage_diff_07
+total_07_filter_female_howMuchCases <- total_07_filter_female_sum_ratio * percentage_diff_07
+total_07_filter_male_howMuchToAdd <- total_07_filter_male_howMuchCases / 13
+total_07_filter_female_howMuchToAdd <- total_07_filter_female_howMuchCases / 13
+
+numCases_07_total <- ( percentage_diff_07 * section7_table1_sum ) / 100
+numCases_07_total_male <- numCases_07_total * total_07_filter_male_sum_ratio
+numCases_07_total_female <- numCases_07_total * total_07_filter_female_sum_ratio
+numCases_07_total_male_howMuchToAdd <- numCases_07_total_male / 13
+numCases_07_total_female_howMuchToAdd <- numCases_07_total_female / 13
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '07 Unlawful entry with intent' & joined_table$Gender == 'Male'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '07 Unlawful entry with intent' & joined_table$Gender == 'Male'] + total_07_filter_male_howMuchToAdd
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '07 Unlawful entry with intent' & joined_table$Gender == 'Female'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '07 Unlawful entry with intent' & joined_table$Gender == 'Female'] + total_07_filter_female_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '07 Unlawful entry with intent' & joined_table$Gender == 'Male'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '07 Unlawful entry with intent' & joined_table$Gender == 'Male'] + numCases_07_total_male_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '07 Unlawful entry with intent' & joined_table$Gender == 'Female'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '07 Unlawful entry with intent' & joined_table$Gender == 'Female'] + numCases_07_total_female_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '07 Unlawful entry with intent' & joined_table$Gender == 'Male'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '07 Unlawful entry with intent' & joined_table$Gender == 'Male'] + numCases_07_total_male_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '07 Unlawful entry with intent' & joined_table$Gender == 'Female'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '07 Unlawful entry with intent' & joined_table$Gender == 'Female'] + numCases_07_total_female_howMuchToAdd
+
+# SECTION 8
+total_08_filter <- joined_table %>% filter(`Principal.offence(b)(c)` == '08 Theft(e)')
+total_08_sum <- sum(total_08_filter$gender_percentage)
+percentage_diff_08 <- 1300 - total_08_sum
+
+total_08_filter_male <- total_08_filter %>% filter(Gender == 'Male')
+total_08_filter_female <- total_08_filter %>% filter(Gender == 'Female')
+total_08_filter_male_sum <- sum(total_08_filter_male$gender_percentage)
+total_08_filter_female_sum <- sum(total_08_filter_female$gender_percentage)
+total_08_filter_male_sum_ratio <- total_08_filter_male_sum/1300
+total_08_filter_female_sum_ratio <- total_08_filter_female_sum/1300
+total_08_filter_male_howMuchCases <- total_08_filter_male_sum_ratio * percentage_diff_08
+total_08_filter_female_howMuchCases <- total_08_filter_female_sum_ratio * percentage_diff_08
+total_08_filter_male_howMuchToAdd <- total_08_filter_male_howMuchCases / 13
+total_08_filter_female_howMuchToAdd <- total_08_filter_female_howMuchCases / 13
+
+numCases_08_total <- ( percentage_diff_08 * section8_table1_sum ) / 100
+numCases_08_total_male <- numCases_08_total * total_08_filter_male_sum_ratio
+numCases_08_total_female <- numCases_08_total * total_08_filter_female_sum_ratio
+numCases_08_total_male_howMuchToAdd <- numCases_08_total_male / 13
+numCases_08_total_female_howMuchToAdd <- numCases_08_total_female / 13
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '08 Theft(e)' & joined_table$Gender == 'Male'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '08 Theft(e)' & joined_table$Gender == 'Male'] + total_08_filter_male_howMuchToAdd
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '08 Theft(e)' & joined_table$Gender == 'Female'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '08 Theft(e)'& joined_table$Gender == 'Female'] + total_08_filter_female_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '08 Theft(e)' & joined_table$Gender == 'Male'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '08 Theft(e)' & joined_table$Gender == 'Male'] + numCases_08_total_male_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '08 Theft(e)' & joined_table$Gender == 'Female'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '08 Theft(e)'& joined_table$Gender == 'Female'] + numCases_08_total_female_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '08 Theft(e)' & joined_table$Gender == 'Male'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '08 Theft(e)' & joined_table$Gender == 'Male'] + numCases_08_total_male_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '08 Theft(e)' & joined_table$Gender == 'Female'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '08 Theft(e)'& joined_table$Gender == 'Female'] + numCases_08_total_female_howMuchToAdd
+
+# SECTION 9
+total_09_filter <- joined_table %>% filter(`Principal.offence(b)(c)` == '09 Fraud/deception')
+total_09_sum <- sum(total_09_filter$gender_percentage)
+percentage_diff_09 <- 1300 - total_09_sum
+
+total_09_filter_male <- total_09_filter %>% filter(Gender == 'Male')
+total_09_filter_female <- total_09_filter %>% filter(Gender == 'Female')
+total_09_filter_male_sum <- sum(total_09_filter_male$gender_percentage)
+total_09_filter_female_sum <- sum(total_09_filter_female$gender_percentage)
+total_09_filter_male_sum_ratio <- total_09_filter_male_sum/1300
+total_09_filter_female_sum_ratio <- total_09_filter_female_sum/1300
+total_09_filter_male_howMuchCases <- total_09_filter_male_sum_ratio * percentage_diff_09
+total_09_filter_female_howMuchCases <- total_09_filter_female_sum_ratio * percentage_diff_09
+total_09_filter_male_howMuchToAdd <- total_09_filter_male_howMuchCases / 13
+total_09_filter_female_howMuchToAdd <- total_09_filter_female_howMuchCases / 13
+
+numCases_09_total <- ( percentage_diff_09 * section9_table1_sum ) / 100
+numCases_09_total_male <- numCases_09_total * total_09_filter_male_sum_ratio
+numCases_09_total_female <- numCases_09_total * total_09_filter_female_sum_ratio
+numCases_09_total_male_howMuchToAdd <- numCases_09_total_male / 13
+numCases_09_total_female_howMuchToAdd <- numCases_09_total_female / 13
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '09 Fraud/deception' & joined_table$Gender == 'Male'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '09 Fraud/deception' & joined_table$Gender == 'Male'] + total_09_filter_male_howMuchToAdd
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '09 Fraud/deception' & joined_table$Gender == 'Female'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '09 Fraud/deception' & joined_table$Gender == 'Female'] + total_09_filter_female_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '09 Fraud/deception' & joined_table$Gender == 'Male'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '09 Fraud/deception' & joined_table$Gender == 'Male'] + numCases_09_total_male_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '09 Fraud/deception' & joined_table$Gender == 'Female'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '09 Fraud/deception' & joined_table$Gender == 'Female'] + numCases_09_total_female_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '09 Fraud/deception' & joined_table$Gender == 'Male'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '09 Fraud/deception' & joined_table$Gender == 'Male'] + numCases_09_total_male_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '09 Fraud/deception' & joined_table$Gender == 'Female'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '09 Fraud/deception' & joined_table$Gender == 'Female'] + numCases_09_total_female_howMuchToAdd
+
+# SECTION 10
+total_10_filter <- joined_table %>% filter(`Principal.offence(b)(c)` == '10 Illicit drug offences')
+total_10_sum <- sum(total_10_filter$gender_percentage)
+percentage_diff_10 <- 1300 - total_10_sum
+
+total_10_filter_male <- total_10_filter %>% filter(Gender == 'Male')
+total_10_filter_female <- total_10_filter %>% filter(Gender == 'Female')
+total_10_filter_male_sum <- sum(total_10_filter_male$gender_percentage)
+total_10_filter_female_sum <- sum(total_10_filter_female$gender_percentage)
+total_10_filter_male_sum_ratio <- total_10_filter_male_sum/1300
+total_10_filter_female_sum_ratio <- total_10_filter_female_sum/1300
+total_10_filter_male_howMuchCases <- total_10_filter_male_sum_ratio * percentage_diff_10
+total_10_filter_female_howMuchCases <- total_10_filter_female_sum_ratio * percentage_diff_10
+total_10_filter_male_howMuchToAdd <- total_10_filter_male_howMuchCases / 13
+total_10_filter_female_howMuchToAdd <- total_10_filter_female_howMuchCases / 13
+
+numCases_10_total <- ( percentage_diff_10 * section10_table1_sum ) / 100
+numCases_10_total_male <- numCases_10_total * total_10_filter_male_sum_ratio
+numCases_10_total_female <- numCases_10_total * total_10_filter_female_sum_ratio
+numCases_10_total_male_howMuchToAdd <- numCases_10_total_male / 13
+numCases_10_total_female_howMuchToAdd <- numCases_10_total_female / 13
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '10 Illicit drug offences' & joined_table$Gender == 'Male'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '10 Illicit drug offences' & joined_table$Gender == 'Male'] + total_10_filter_male_howMuchToAdd
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '10 Illicit drug offences' & joined_table$Gender == 'Female'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '10 Illicit drug offences' & joined_table$Gender == 'Female'] + total_10_filter_female_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '10 Illicit drug offences' & joined_table$Gender == 'Male'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '10 Illicit drug offences' & joined_table$Gender == 'Male'] + numCases_10_total_male_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '10 Illicit drug offences' & joined_table$Gender == 'Female'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '10 Illicit drug offences' & joined_table$Gender == 'Female'] + numCases_10_total_female_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '10 Illicit drug offences' & joined_table$Gender == 'Male'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '10 Illicit drug offences' & joined_table$Gender == 'Male'] + numCases_10_total_male_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '10 Illicit drug offences' & joined_table$Gender == 'Female'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '10 Illicit drug offences' & joined_table$Gender == 'Female'] + numCases_10_total_female_howMuchToAdd
+
+# SECTION 11
+total_11_filter <- joined_table %>% filter(`Principal.offence(b)(c)` == '11 Weapons/explosives')
+total_11_sum <- sum(total_11_filter$gender_percentage)
+percentage_diff_11 <- 1300 - total_11_sum
+
+total_11_filter_male <- total_11_filter %>% filter(Gender == 'Male')
+total_11_filter_female <- total_11_filter %>% filter(Gender == 'Female')
+total_11_filter_male_sum <- sum(total_11_filter_male$gender_percentage)
+total_11_filter_female_sum <- sum(total_11_filter_female$gender_percentage)
+total_11_filter_male_sum_ratio <- total_11_filter_male_sum/1300
+total_11_filter_female_sum_ratio <- total_11_filter_female_sum/1300
+total_11_filter_male_howMuchCases <- total_11_filter_male_sum_ratio * percentage_diff_11
+total_11_filter_female_howMuchCases <- total_11_filter_female_sum_ratio * percentage_diff_11
+total_11_filter_male_howMuchToAdd <- total_11_filter_male_howMuchCases / 13
+total_11_filter_female_howMuchToAdd <- total_11_filter_female_howMuchCases / 13
+
+numCases_11_total <- ( percentage_diff_11 * section11_table1_sum ) / 100
+numCases_11_total_male <- numCases_11_total * total_11_filter_male_sum_ratio
+numCases_11_total_female <- numCases_11_total * total_11_filter_female_sum_ratio
+numCases_11_total_male_howMuchToAdd <- numCases_11_total_male / 13
+numCases_11_total_female_howMuchToAdd <- numCases_11_total_female / 13
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '11 Weapons/explosives' & joined_table$Gender == 'Male'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '11 Weapons/explosives' & joined_table$Gender == 'Male'] + total_11_filter_male_howMuchToAdd
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '11 Weapons/explosives' & joined_table$Gender == 'Female'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '11 Weapons/explosives' & joined_table$Gender == 'Female'] + total_11_filter_female_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '11 Weapons/explosives' & joined_table$Gender == 'Male'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '11 Weapons/explosives' & joined_table$Gender == 'Male'] + numCases_11_total_male_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '11 Weapons/explosives' & joined_table$Gender == 'Female'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '11 Weapons/explosives' & joined_table$Gender == 'Female'] + numCases_11_total_female_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '11 Weapons/explosives' & joined_table$Gender == 'Male'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '11 Weapons/explosives' & joined_table$Gender == 'Male'] + numCases_11_total_male_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '11 Weapons/explosives' & joined_table$Gender == 'Female'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '11 Weapons/explosives' & joined_table$Gender == 'Female'] + numCases_11_total_female_howMuchToAdd
+
+# SECTION 12
+total_12_filter <- joined_table %>% filter(`Principal.offence(b)(c)` == '12 Property damage and environmental pollution')
+total_12_sum <- sum(total_12_filter$gender_percentage)
+percentage_diff_12 <- 1300 - total_12_sum
+
+total_12_filter_male <- total_12_filter %>% filter(Gender == 'Male')
+total_12_filter_female <- total_12_filter %>% filter(Gender == 'Female')
+total_12_filter_male_sum <- sum(total_12_filter_male$gender_percentage)
+total_12_filter_female_sum <- sum(total_12_filter_female$gender_percentage)
+total_12_filter_male_sum_ratio <- total_12_filter_male_sum/1300
+total_12_filter_female_sum_ratio <- total_12_filter_female_sum/1300
+total_12_filter_male_howMuchCases <- total_12_filter_male_sum_ratio * percentage_diff_12
+total_12_filter_female_howMuchCases <- total_12_filter_female_sum_ratio * percentage_diff_12
+total_12_filter_male_howMuchToAdd <- total_12_filter_male_howMuchCases / 13
+total_12_filter_female_howMuchToAdd <- total_12_filter_female_howMuchCases / 13
+
+numCases_12_total <- ( percentage_diff_12 * section12_table1_sum ) / 100
+numCases_12_total_male <- numCases_12_total * total_12_filter_male_sum_ratio
+numCases_12_total_female <- numCases_12_total * total_12_filter_female_sum_ratio
+numCases_12_total_male_howMuchToAdd <- numCases_12_total_male / 13
+numCases_12_total_female_howMuchToAdd <- numCases_12_total_female / 13
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '12 Property damage and environmental pollution' & joined_table$Gender == 'Male'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '12 Property damage and environmental pollution' & joined_table$Gender == 'Male'] + total_12_filter_male_howMuchToAdd
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '12 Property damage and environmental pollution' & joined_table$Gender == 'Female'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '12 Property damage and environmental pollution' & joined_table$Gender == 'Female'] + total_12_filter_female_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '12 Property damage and environmental pollution' & joined_table$Gender == 'Male'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '12 Property damage and environmental pollution' & joined_table$Gender == 'Male'] + numCases_12_total_male_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '12 Property damage and environmental pollution' & joined_table$Gender == 'Female'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '12 Property damage and environmental pollution' & joined_table$Gender == 'Female'] + numCases_12_total_female_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '12 Property damage and environmental pollution' & joined_table$Gender == 'Male'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '12 Property damage and environmental pollution' & joined_table$Gender == 'Male'] + numCases_12_total_male_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '12 Property damage and environmental pollution' & joined_table$Gender == 'Female'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '12 Property damage and environmental pollution' & joined_table$Gender == 'Female'] + numCases_12_total_female_howMuchToAdd
+
+# SECTION 13
+total_13_filter <- joined_table %>% filter(`Principal.offence(b)(c)` == '13 Public order offences')
+total_13_sum <- sum(total_13_filter$gender_percentage)
+percentage_diff_13 <- 1300 - total_13_sum
+
+total_13_filter_male <- total_13_filter %>% filter(Gender == 'Male')
+total_13_filter_female <- total_13_filter %>% filter(Gender == 'Female')
+total_13_filter_male_sum <- sum(total_13_filter_male$gender_percentage)
+total_13_filter_female_sum <- sum(total_13_filter_female$gender_percentage)
+total_13_filter_male_sum_ratio <- total_13_filter_male_sum/1300
+total_13_filter_female_sum_ratio <- total_13_filter_female_sum/1300
+total_13_filter_male_howMuchCases <- total_13_filter_male_sum_ratio * percentage_diff_13
+total_13_filter_female_howMuchCases <- total_13_filter_female_sum_ratio * percentage_diff_13
+total_13_filter_male_howMuchToAdd <- total_13_filter_male_howMuchCases / 13
+total_13_filter_female_howMuchToAdd <- total_13_filter_female_howMuchCases / 13
+
+numCases_13_total <- ( percentage_diff_13 * section13_table1_sum ) / 100
+numCases_13_total_male <- numCases_13_total * total_13_filter_male_sum_ratio
+numCases_13_total_female <- numCases_13_total * total_13_filter_female_sum_ratio
+numCases_13_total_male_howMuchToAdd <- numCases_13_total_male / 13
+numCases_13_total_female_howMuchToAdd <- numCases_13_total_female / 13
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '13 Public order offences' & joined_table$Gender == 'Male'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '13 Public order offences' & joined_table$Gender == 'Male'] + total_13_filter_male_howMuchToAdd
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '13 Public order offences' & joined_table$Gender == 'Female'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '13 Public order offences' & joined_table$Gender == 'Female'] + total_13_filter_female_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '13 Public order offences' & joined_table$Gender == 'Male'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '13 Public order offences' & joined_table$Gender == 'Male'] + numCases_13_total_male_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '13 Public order offences' & joined_table$Gender == 'Female'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '13 Public order offences' & joined_table$Gender == 'Female'] + numCases_13_total_female_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '13 Public order offences' & joined_table$Gender == 'Male'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '13 Public order offences' & joined_table$Gender == 'Male'] + numCases_13_total_male_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '13 Public order offences' & joined_table$Gender == 'Female'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '13 Public order offences' & joined_table$Gender == 'Female'] + numCases_13_total_female_howMuchToAdd
+
+# SECTION 15
+total_15_filter <- joined_table %>% filter(`Principal.offence(b)(c)` == '15 Offences against justice(f)')
+total_15_sum <- sum(total_15_filter$gender_percentage)
+percentage_diff_15 <- 1300 - total_15_sum
+
+total_15_filter_male <- total_15_filter %>% filter(Gender == 'Male')
+total_15_filter_female <- total_15_filter %>% filter(Gender == 'Female')
+total_15_filter_male_sum <- sum(total_15_filter_male$gender_percentage)
+total_15_filter_female_sum <- sum(total_15_filter_female$gender_percentage)
+total_15_filter_male_sum_ratio <- total_15_filter_male_sum/1300
+total_15_filter_female_sum_ratio <- total_15_filter_female_sum/1300
+total_15_filter_male_howMuchCases <- total_15_filter_male_sum_ratio * percentage_diff_15
+total_15_filter_female_howMuchCases <- total_15_filter_female_sum_ratio * percentage_diff_15
+total_15_filter_male_howMuchToAdd <- total_15_filter_male_howMuchCases / 13
+total_15_filter_female_howMuchToAdd <- total_15_filter_female_howMuchCases / 13
+
+numCases_15_total <- ( percentage_diff_15 * section15_table1_sum ) / 100
+numCases_15_total_male <- numCases_15_total * total_15_filter_male_sum_ratio
+numCases_15_total_female <- numCases_15_total * total_15_filter_female_sum_ratio
+numCases_15_total_male_howMuchToAdd <- numCases_15_total_male / 13
+numCases_15_total_female_howMuchToAdd <- numCases_15_total_female / 13
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '15 Offences against justice(f)' & joined_table$Gender == 'Male'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '15 Offences against justice(f)' & joined_table$Gender == 'Male'] + total_15_filter_male_howMuchToAdd
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '15 Offences against justice(f)' & joined_table$Gender == 'Female'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '15 Offences against justice(f)' & joined_table$Gender == 'Female'] + total_15_filter_female_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '15 Offences against justice(f)' & joined_table$Gender == 'Male'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '15 Offences against justice(f)' & joined_table$Gender == 'Male'] + numCases_15_total_male_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '15 Offences against justice(f)' & joined_table$Gender == 'Female'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '15 Offences against justice(f)' & joined_table$Gender == 'Female'] + numCases_15_total_female_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '15 Offences against justice(f)' & joined_table$Gender == 'Male'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '15 Offences against justice(f)' & joined_table$Gender == 'Male'] + numCases_15_total_male_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '15 Offences against justice(f)' & joined_table$Gender == 'Female'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '15 Offences against justice(f)' & joined_table$Gender == 'Female'] + numCases_15_total_female_howMuchToAdd
+
+# SECTION 16
+total_16_filter <- joined_table %>% filter(`Principal.offence(b)(c)` == '16 Miscellaneous offences')
+total_16_sum <- sum(total_16_filter$gender_percentage)
+percentage_diff_16 <- 1300 - total_16_sum
+
+total_16_filter_male <- total_16_filter %>% filter(Gender == 'Male')
+total_16_filter_female <- total_16_filter %>% filter(Gender == 'Female')
+total_16_filter_male_sum <- sum(total_16_filter_male$gender_percentage)
+total_16_filter_female_sum <- sum(total_16_filter_female$gender_percentage)
+total_16_filter_male_sum_ratio <- total_16_filter_male_sum/1300
+total_16_filter_female_sum_ratio <- total_16_filter_female_sum/1300
+total_16_filter_male_howMuchCases <- total_16_filter_male_sum_ratio * percentage_diff_16
+total_16_filter_female_howMuchCases <- total_16_filter_female_sum_ratio * percentage_diff_16
+total_16_filter_male_howMuchToAdd <- total_16_filter_male_howMuchCases / 13
+total_16_filter_female_howMuchToAdd <- total_16_filter_female_howMuchCases / 13
+
+numCases_16_total <- ( percentage_diff_16 * section16_table1_sum ) / 100
+numCases_16_total_male <- numCases_16_total * total_16_filter_male_sum_ratio
+numCases_16_total_female <- numCases_16_total * total_16_filter_female_sum_ratio
+numCases_16_total_male_howMuchToAdd <- numCases_16_total_male / 13
+numCases_16_total_female_howMuchToAdd <- numCases_16_total_female / 13
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '16 Miscellaneous offences' & joined_table$Gender == 'Male'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '16 Miscellaneous offences' & joined_table$Gender == 'Male'] + total_16_filter_male_howMuchToAdd
+
+joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '16 Miscellaneous offences' & joined_table$Gender == 'Female'] <- joined_table$gender_percentage[joined_table$`Principal.offence(b)(c)` == '16 Miscellaneous offences' & joined_table$Gender == 'Female'] + total_16_filter_female_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '16 Miscellaneous offences' & joined_table$Gender == 'Male'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '16 Miscellaneous offences' & joined_table$Gender == 'Male'] + numCases_16_total_male_howMuchToAdd
+
+joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '16 Miscellaneous offences' & joined_table$Gender == 'Female'] <- joined_table$total_offences_of_gender[joined_table$`Principal.offence(b)(c)` == '16 Miscellaneous offences' & joined_table$Gender == 'Female'] + numCases_16_total_female_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '16 Miscellaneous offences' & joined_table$Gender == 'Male'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '16 Miscellaneous offences' & joined_table$Gender == 'Male'] + numCases_16_total_male_howMuchToAdd
+
+joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '16 Miscellaneous offences' & joined_table$Gender == 'Female'] <- joined_table$total_offences_both_gender[joined_table$`Principal.offence(b)(c)` == '16 Miscellaneous offences' & joined_table$Gender == 'Female'] + numCases_16_total_female_howMuchToAdd
+```
+
+```{r echo=TRUE}
+# The sum of gender_percentage now is 19499.88 which is REALLY close to 19500. I have added the missing cases and the missing percentage now.
+sum(joined_table$gender_percentage)
+
+```
+
+I assumed before doing this section that the data in both data sets do
+not have any missing values, special values or obvious inconsistency. I
+made sure that this is the case. Also, at the end of last section I
+assumed that there's a human error in one of the categories but it turns
+out that each category have human error either by the code/logic I wrote
+or by the data itself. I figured this out by filtering each category and
+then summing all gender_percentage values.
+
+I have first checked for missing values, special values and obvious
+inconsistencies using is.na(), is.infinite(), is.nan(), and the sum()
+functions. Then, from the last section, I found no error with the new
+attribute offence_rate I created in table1_all_tidy_withRate dataset.
+But there was an error with the attribute gender_percentage that I
+created in joined_table data set where there were missing percentages
+which means there are missing cases. The approach I took to fix this is
+as follows:
+
+1- I filtered each category.
+
+2- I summed the total gender_percentage for each category.
+
+3- I found the missing percentage of each category by substracting the
+total gender_percentage from 1300.
+
+4- I filtered the category by gender.
+
+5- I found the total gender_percentage by male and female.
+
+6- I divided that total gender_percentage of male and female by 1300 to
+find the ratio of how much male and female should take from the missing
+percentage.
+
+7- I multiplied male and female ratios by the missing percentage.
+
+8- Divided it by 13 since the observations are recorded for 13 dates. To
+distribute the percentage across the 13 dates.
+
+9- I then multiplied the missing percentage by the total number of cases
+and divide it by 100 to find the total missing cases from this
+percentage.
+
+10- I multiplied the result of step 9 by the ratio of male and female to
+find out how much the cases should be distributed to each gender.
+
+11- Same to step 8, I divide the step 10 by 13.
+
+I did that for all categories. The result is 19499.88 which is really
+close to 19500.
+
+## **Scan II**
+
+```{r echo=TRUE}
+#### SECTION 1
+# Male homicide data
+male_01 <- joined_table %>% filter(`Principal.offence(b)(c)` == '01 Homicide and related offences' & Gender == 'Male')
+# skewed to the left
+hist(male_01$total_offences_of_gender)
+male_01$total_offences_of_gender %>% boxplot(main="Boxplot of Homicide offences by Male",ylab="Number of homicide offences.")
+boxplot.stats(male_01$total_offences_of_gender)$out
+# I have decided to replace the outlier with the nearest value since the mean is not a good summary statistic in this case because the data are skewed. Also, the mode is not a good replacement since the data are relatively small.
+male_01$total_offences_of_gender[ male_01$total_offences_of_gender == boxplot.stats(male_01$total_offences_of_gender)$out
+] <- 0
+male_01$total_offences_of_gender[ male_01$total_offences_of_gender == boxplot.stats(male_01$total_offences_of_gender)$out
+] <- max(male_01$total_offences_of_gender)
+
+male_01$total_offences_of_gender %>% boxplot(main="Boxplot of Homicide offences by Male",ylab="Number of homicide offences.")
+
+# Female homicide data
+female_01 <- joined_table %>% filter(`Principal.offence(b)(c)` == '01 Homicide and related offences' & Gender == 'Female')
+#normally distributed
+hist(female_01$total_offences_of_gender)
+z.scores_female_01 <-  female_01$total_offences_of_gender %>%  scores(type = "z")
+outliers_01_female <- which(abs(z.scores_female_01) >3 )
+outliers_01_female
+# Since all z.scores values are not bigger than 3 (integer(0) output), then the data have no outliers.
+
+```
+
+```{r echo=TRUE}
+### I have done the same for all 16 categories
+#     SECTION 2-16 CODE RAN BUT HIDDEN FOR PAGE LIMIT AND TO MAKE REPORT MORE ORGANISED
+###
+```
+
+```{r echo=TRUE}
+### SECTION 2
+# Male Acts intended to causae injury
+male_02 <- joined_table %>% filter(`Principal.offence(b)(c)` == '02 Acts intended to cause injury'
+                                   & Gender == 'Male')
+# normally distributed
+hist(male_02$total_offences_of_gender)
+z.scores_male_02 <- male_02$total_offences_of_gender %>%  scores(type = "z")
+outliers_02_male <- which(abs(z.scores_male_02) >3 )
+outliers_02_male
+# Since all z.scores values are not bigger than 3, then the data have no outliers.
+# Female Acts intended to cause injury
+female_02 <- joined_table %>% filter(`Principal.offence(b)(c)` == '02 Acts intended to cause injury'
+                                     & Gender == 'Female')
+# skewed to the left
+hist(female_02$total_offences_of_gender)
+female_02$total_offences_of_gender %>% boxplot(main="Boxplot of Acts intended to cause injury by Female",ylab="Number of acts")
+boxplot.stats(female_02$total_offences_of_gender)$out
+# There are no outliers showen by the boxplot
+
+### SECTION 3
+male_03 <- joined_table %>% filter(`Principal.offence(b)(c)` == '03 Sexual assault and related offences' & Gender == 'Male')
+# Normally dist
+hist(male_03$total_offences_of_gender)
+z.scores_male_03 <- male_03$total_offences_of_gender %>%  scores(type = "z")
+outliers_03_male <- which(abs(z.scores_male_03) >3 )
+outliers_03_male
+# Since all z.scores values are not bigger than 3, then the data have no outliers.
+female_03 <- joined_table %>% filter(`Principal.offence(b)(c)` == '03 Sexual assault and related offences' & Gender == 'Female')
+# normally dist
+hist(female_03$total_offences_of_gender)
+z.scores_female_03 <- female_03$total_offences_of_gender %>%  scores(type = "z")
+outliers_03_female <- which(abs(z.scores_female_03) >3 )
+outliers_03_female
+# Since all z.scores values are not bigger than 3, then the data have no outliers.
+
+### SECTION 4
+male_04 <- joined_table %>% filter(`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(d)' & Gender == 'Male')
+# normally dist
+hist(male_04$total_offences_of_gender)
+z.scores_male_04 <- male_04$total_offences_of_gender %>%  scores(type = "z")
+outliers_04_male <- which(abs(z.scores_male_04) >3 )
+outliers_04_male
+# Since all z.scores values are not bigger than 3, then the data have no outliers.
+female_04 <- joined_table %>% filter(`Principal.offence(b)(c)` == '04 Dangerous/negligent acts(d)' & Gender == 'Female')
+# skewed to the left
+hist(female_04$total_offences_of_gender)
+female_04$total_offences_of_gender %>% boxplot(main="Boxplot of Dangerous/negligent acts of Female",ylab="Number of offences")
+boxplot.stats(female_04$total_offences_of_gender)$out
+# There are no outliers showen by the boxplot
+
+### SECTION 5
+male_05 <- joined_table %>% filter(`Principal.offence(b)(c)` == '05 Abduction/harassment' & Gender == 'Male')
+# normally dist
+hist(male_05$total_offences_of_gender)
+z.scores_male_05 <- male_05$total_offences_of_gender %>%  scores(type = "z")
+outliers_05_male <- which(abs(z.scores_male_05) >3 )
+outliers_05_male
+# there are no outliers
+female_05 <- joined_table %>% filter(`Principal.offence(b)(c)` == '05 Abduction/harassment' & Gender == 'Female')
+# normally dist
+hist(female_05$total_offences_of_gender)
+z.scores_female_05 <- female_05$total_offences_of_gender %>%  scores(type = "z")
+outliers_05_female <- which(abs(z.scores_female_05) >3 )
+outliers_05_female
+# there are no outliers
+
+### SECTION 6
+male_06 <- joined_table %>% filter(`Principal.offence(b)(c)` == '06 Robbery/extortion' & Gender == 'Male')
+# normally dist
+hist(male_06$total_offences_of_gender)
+z.scores_male_06 <- male_06$total_offences_of_gender %>%  scores(type = "z")
+outliers_06_male <- which(abs(z.scores_male_06) >3 )
+outliers_06_male
+# there are no outliers
+female_06 <- joined_table %>% filter(`Principal.offence(b)(c)` == '06 Robbery/extortion' & Gender == 'Female')
+# normally dist
+hist(female_06$total_offences_of_gender)
+z.scores_female_06 <- female_06$total_offences_of_gender %>%  scores(type = "z")
+outliers_06_female <- which(abs(z.scores_female_06) >3 )
+# there are no outliers
+outliers_06_female
+
+### SECTION 7
+male_07 <- joined_table %>% filter(`Principal.offence(b)(c)` == '07 Unlawful entry with intent' & Gender == 'Male')
+# normally dist
+hist(male_07$total_offences_of_gender)
+z.scores_male_07 <- male_07$total_offences_of_gender %>%  scores(type = "z")
+outliers_07_male <- which(abs(z.scores_male_07) >3 )
+outliers_07_male
+# there are no outliers
+female_07 <- joined_table %>% filter(`Principal.offence(b)(c)` == '07 Unlawful entry with intent' & Gender == 'Female')
+# normally dist
+hist(female_07$total_offences_of_gender)
+z.scores_female_07 <- female_07$total_offences_of_gender %>%  scores(type = "z")
+outliers_07_female <- which(abs(z.scores_female_07) >3 )
+outliers_07_female
+# there are no outliers
+
+### SECTION 8
+male_08 <- joined_table %>% filter(`Principal.offence(b)(c)` == '08 Theft(e)' & Gender == 'Male')
+# normally dist
+hist(male_08$total_offences_of_gender)
+z.scores_male_08 <- male_08$total_offences_of_gender %>%  scores(type = "z")
+outliers_08_male <- which(abs(z.scores_male_08) >3 )
+outliers_08_male
+# there are no outliers
+female_08 <- joined_table %>% filter(`Principal.offence(b)(c)` == '08 Theft(e)' & Gender == 'Female')
+# normally dist
+hist(female_08$total_offences_of_gender)
+z.scores_female_08 <- female_08$total_offences_of_gender %>%  scores(type = "z")
+outliers_08_female <- which(abs(z.scores_female_08) >3 )
+outliers_08_female
+# there are no outliers
+
+### SECTION 9
+male_09 <- joined_table %>% filter(`Principal.offence(b)(c)` == '09 Fraud/deception' & Gender == 'Male')
+#normally dist
+hist(male_09$total_offences_of_gender)
+z.scores_male_09 <- male_09$total_offences_of_gender %>%  scores(type = "z")
+outliers_09_male <- which(abs(z.scores_male_09) >3 )
+outliers_09_male
+# there are no outliers
+female_09 <- joined_table %>% filter(`Principal.offence(b)(c)` == '09 Fraud/deception' & Gender == 'Female')
+#normally dist
+hist(female_09$total_offences_of_gender)
+z.scores_female_09 <- female_09$total_offences_of_gender %>%  scores(type = "z")
+outliers_09_female <- which(abs(z.scores_female_09) >3 )
+outliers_09_male
+# there are no outliers
+
+### SECTION 10
+male_10 <- joined_table %>% filter(`Principal.offence(b)(c)` == '10 Illicit drug offences' & Gender == 'Male')
+# skewed to the left
+hist(male_10$total_offences_of_gender)
+male_10$total_offences_of_gender %>% boxplot(main="Boxplot of Illicit drug offences by Male",ylab="Number of offences.")
+# there are no outliers shown in the boxplot
+female_10 <- joined_table %>% filter(`Principal.offence(b)(c)` == '10 Illicit drug offences' & Gender == 'Female')
+hist(female_10$total_offences_of_gender)
+female_10$total_offences_of_gender %>% boxplot(main="Boxplot of Illicit drug offences by Female",ylab="Number of offences.")
+# there are no outliers shown in the boxplot
+
+### SECTION 11
+male_11 <- joined_table %>% filter(`Principal.offence(b)(c)` == '11 Weapons/explosives' & Gender == 'Male')
+# normally dist
+hist(male_11$total_offences_of_gender)
+z.scores_male_11 <- male_11$total_offences_of_gender %>%  scores(type = "z")
+outliers_11_male <- which(abs(z.scores_male_11) >3 )
+outliers_11_male
+# no outliers
+female_11 <- joined_table %>% filter(`Principal.offence(b)(c)` == '11 Weapons/explosives' & Gender == 'Female')
+# skewed to the right
+hist(female_11$total_offences_of_gender)
+female_11$total_offences_of_gender %>% boxplot(main="Boxplot of Weapons/explosives by Female",ylab="Number of offences.")
+# there are no outliers shown by the boxplot
+
+### SECTION 12
+male_12 <- joined_table %>% filter(`Principal.offence(b)(c)` == '12 Property damage and environmental pollution' & Gender == 'Male')
+# normally dist
+hist(male_12$total_offences_of_gender)
+z.scores_male_12 <- male_12$total_offences_of_gender %>%  scores(type = "z")
+outliers_12_male <- which(abs(z.scores_male_12) >3 )
+outliers_12_male
+# there are no outliers
+female_12 <- joined_table %>% filter(`Principal.offence(b)(c)` == '12 Property damage and environmental pollution' & Gender == 'Female')
+# normally dist
+hist(female_12$total_offences_of_gender)
+z.scores_female_12 <- female_12$total_offences_of_gender %>%  scores(type = "z")
+outliers_12_female <- which(abs(z.scores_female_12) >3 )
+outliers_12_female
+# there are no outliers
+
+### SECTION 13
+male_13 <- joined_table %>% filter(`Principal.offence(b)(c)` == '13 Public order offences' & Gender == 'Male')
+# normally dist
+hist(male_13$total_offences_of_gender)
+z.scores_male_13 <- male_13$total_offences_of_gender %>%  scores(type = "z")
+outliers_13_male <- which(abs(z.scores_male_13) >3 )
+outliers_13_male
+# there are no outliers
+female_13 <- joined_table %>% filter(`Principal.offence(b)(c)` == '13 Public order offences' & Gender == 'Female')
+# normally dist
+hist(female_13$total_offences_of_gender)
+z.scores_female_13 <- female_13$total_offences_of_gender %>%  scores(type = "z")
+outliers_13_female <- which(abs(z.scores_female_13) >3 )
+outliers_13_female
+# there are no outliers
+
+### SECTION 15
+male_15 <- joined_table %>% filter(`Principal.offence(b)(c)` == '15 Offences against justice(f)' & Gender == 'Male')
+# normally dist
+hist(male_15$total_offences_of_gender)
+z.scores_male_15 <- male_15$total_offences_of_gender %>%  scores(type = "z")
+outliers_15_male <- which(abs(z.scores_male_15) >3 )
+outliers_15_male
+# there are no outliers
+female_15 <- joined_table %>% filter(`Principal.offence(b)(c)` == '15 Offences against justice(f)' & Gender == 'Female')
+# normally dist
+hist(female_15$total_offences_of_gender)
+z.scores_female_15 <- female_15$total_offences_of_gender %>%  scores(type = "z")
+outliers_15_female <- which(abs(z.scores_female_15) >3 )
+outliers_15_female
+# there are no outliers
+
+### SECTION 16
+male_16 <- joined_table %>% filter(`Principal.offence(b)(c)` == '16 Miscellaneous offences' & Gender == 'Male')
+# normally dist
+hist(male_16$total_offences_of_gender)
+z.scores_male_16 <- male_16$total_offences_of_gender %>%  scores(type = "z")
+outliers_16_male <- which(abs(z.scores_male_16) >3 )
+outliers_16_male
+# there are no outliers
+female_16 <- joined_table %>% filter(`Principal.offence(b)(c)` == '16 Miscellaneous offences' & Gender == 'Female')
+# skewed to the left
+hist(female_16$total_offences_of_gender)
+female_16$total_offences_of_gender %>% boxplot(main="Boxplot of Miscellaneous offences by Female",ylab="Number of offences.")
+# Replaced with the nearest value.
+female_16$total_offences_of_gender[ female_16$total_offences_of_gender == boxplot.stats(female_16$total_offences_of_gender)$out
+] <- 0
+female_16$total_offences_of_gender[ female_16$total_offences_of_gender == boxplot.stats(female_16$total_offences_of_gender)$out
+] <- max(female_16$total_offences_of_gender)
+female_16$total_offences_of_gender %>% boxplot(main="Boxplot of Miscellaneous offences by Female",ylab="Number of offences.")
+```
+
+The steps I took to find the outliers and remove it is as follows:
+
+1- I first filtered each category.
+
+2- I filtered that category for each gender.
+
+3- I used hist() function to check the distribution if it is either
+normally distributed or skewed. If the distribution is skewed, I used
+boxplot to find the outlier and exclude it. If the distribution is
+normal, I used z values to exclude the outliers if there is any.
+
+Since the data sets are relatively small, replacing the outlier with
+mean, median, or mode is not a good idea. Therefore, I replaced the
+outlier with the nearest maximum/minimum value.
+
+I did this for all categories.
+
+<br> <br>
+
+## **Transform**
+
+```{r echo=TRUE}
+# Plotting all categories together in a histogram
+male <- joined_table %>% filter(Gender == 'Male')
+female <- joined_table %>% filter(Gender == 'Female')
+
+hist(male$total_offences_of_gender)
+hist(female$total_offences_of_gender)
+
+# reducing right skewness
+log_male <- log10(male$total_offences_of_gender)
+hist(log_male)
+
+log_female <- log10(female$total_offences_of_gender)
+hist(log_female)
+```
+
+I filtered total_offences_of_gender by gender. Then, I observed the
+distribution of both gender data by using hist(). I saw that the
+distribution is highly right skewed. Therefore, I used log scale to
+reduce the skewness.
+
+<br> <br>
